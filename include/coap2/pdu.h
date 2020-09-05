@@ -106,6 +106,7 @@ struct coap_session_t;
 #define COAP_OPTION_PROXY_URI      35 /* C, String, 1-1034 B, (none) */
 #define COAP_OPTION_PROXY_SCHEME   39 /* C, String, 1-255 B, (none) */
 #define COAP_OPTION_SIZE1          60 /* E, uint, 0-4 B, (none) */
+#define COAP_MEDIA_TYPE_PKCS10    286 /* Media type used for CSRs on EST */
 
 /* option types from RFC 7641 */
 

@@ -15,6 +15,13 @@
 #include "coap_session.h"
 #include "pdu.h"
 
+#if HAVE_CISCO
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <openssl/rand.h>
+#include <openssl/hmac.h>
+#include <openssl/x509v3.h>
+#endif
 /**
  * @defgroup dtls DTLS Support
  * API functions for interfacing with DTLS libraries.
@@ -58,6 +65,36 @@ typedef struct coap_tls_version_t {
 coap_tls_version_t *coap_get_tls_library_version(void);
 
 struct coap_dtls_pki_t;
+
+#if HAVE_CISCO 
+/**
+ * Security setup handler that can be used as application call-back in
+ * coap_context_set_pki().
+ * Typically, this will be calling additonal functions like
+ * SSL_CTX_set_tlsext_servername_callback() etc.
+ *
+ * @param tls_context The security context definition - e.g. SSL_CTX * for
+ *                    OpenSSL. This will be dependent on the underlying TLS
+ *                    library - see coap_get_tls_library_version()
+ * @param tls_session The security session definition - e.g. SSL * for OpenSSL.
+ *                    NULL if server call-back.
+ *                    This will be dependent on the underlying TLS library -
+ *                    see coap_get_tls_library_version()
+ * @param setup_data A structure containing setup data originally passed into
+ *                   coap_context_set_pki() or coap_new_client_session_pki().
+ *
+ * @return @c 1 if successful, else @c 0.
+ */
+/*
+ * CISCO:  This is the previous call back prototype where the application is
+ *         permitted to set up PKI in the SSL_CTX at init time and not on
+ *         every single client hello
+ */
+typedef int (*coap_dtls_init_security_setup_t)(void *tls_context, void* tls_session,
+                                               struct coap_dtls_pki_t *setup_data);
+
+#define coap_dtls_timer_callback_t DTLS_timer_cb
+#endif /* CISCO */
 
 /**
  * Additional Security setup handler that can be set up by
@@ -131,6 +168,9 @@ typedef enum coap_asn1_privatekey_type_t {
 typedef enum coap_pki_key_t {
   COAP_PKI_KEY_PEM,      /**< The PKI key type is PEM */
   COAP_PKI_KEY_ASN1,      /**< The PKI key type is ASN.1 (DER) */
+#if HAVE_CISCO  
+  COAP_PKI_KEY_OSSL,      /**< The PKI key type is native OpenSSL structures */
+#endif  
 } coap_pki_key_t;
 
 /**
@@ -155,6 +195,19 @@ typedef struct coap_pki_key_asn1_t {
   coap_asn1_privatekey_type_t private_key_type; /**< Private Key Type */
 } coap_pki_key_asn1_t;
 
+#if HAVE_CISCO
+/**
+ * The structure that holds the OpenSSL native PKI definitions.
+ */
+typedef struct coap_pki_key_openssl_t {
+  X509_STORE *ca_certs;    /**< ASN1 (DER) Common CA Cert */
+  X509 *public_cert;       /**< ASN1 (DER) Public Cert */
+  EVP_PKEY *private_key;   /**< ASN1 (DER) Private Key */
+  size_t public_cert_len;        /**< ASN1 Public Cert length */
+  size_t private_key_len;        /**< ASN1 Private Key length */
+} coap_pki_key_openssl_t;
+#endif
+
 /**
  * The structure that holds the PKI key information.
  */
@@ -163,6 +216,9 @@ typedef struct coap_dtls_key_t {
   union {
     coap_pki_key_pem_t pem;         /**< for PEM keys */
     coap_pki_key_asn1_t asn1;       /**< for ASN.1 (DER) keys */
+#if HAVE_CISCO
+    coap_pki_key_openssl_t ossl;    /**< for ASN.1 (DER) keys */
+#endif
   } key;
 } coap_dtls_key_t;
 
@@ -226,13 +282,46 @@ typedef struct coap_dtls_pki_t {
   coap_dtls_sni_callback_t validate_sni_call_back;
   void *sni_call_back_arg;  /**< Passed in to the sni call-back function */
 
+#if HAVE_CISCO /* Cisco specific - the previous mechanism used */
+  /** Application Setup call-back definition, overriding libcoap's TLS call-backs.
+   * If not @p NULL, then application is handling the characteristics of the TLS
+   * connection setup in the defined call-back handler.  If set, then none of
+   * the options or call-backs above are acted on.
+   * Otherwise, libcoap internally based on the selected options handles the
+   * TLS connection setup.
+   */
+    coap_dtls_init_security_setup_t app_override_tls_setup_call_back;
+    void *override_call_back_arg;  /**< Passed in to the override call-back function */
+
+  /** DTLS timer call-back function.
+   * If not @p NULL, this callback function is registered with OpenSSL as the
+   * timer function to set the DTLS handshake timer value.  Since it's being immediately
+   * passed to OpenSSL, we'll just alias it to the OpenSSL callback function.
+   *
+   * Unlike the other *_arg variables, this one is not going to be passed to
+   * the callback since it cannot be, the callback is being invoked from
+   * OpenSSL.  Instead, we use this to allow the application (CiscoEST) to
+   * pass in the EST ctx so we can store it away in the CoAP session
+   * structure's app element.  This way we can obtain addressability back to
+   * the EST context in the timer callback function.
+   */
+    coap_dtls_timer_callback_t dtls_timer_call_back;
+    void *dtls_timer_call_back_arg;  
+
+  /** DTLS handshake MTU.
+   * If not @p 0, this value is used to set the DTLS handshake MTU value in
+   * CiscoSSL
+   */
+    uint16_t dtls_handshake_mtu;
+#endif /* CISCO */
+
   /** Addtional Security call-back handler that is invoked when libcoap has
    * done the standerd, defined validation checks at the TLS level,
    * If not @p NULL, called from within the TLS Client Hello connection
    * setup.
    */
   coap_dtls_security_setup_t additional_tls_setup_call_back;
-
+    
   char* client_sni;    /**<  If not NULL, SNI to use in client TLS setup.
                              Owned by the client app and must remain valid
                              during the call to coap_new_client_session_pki() */

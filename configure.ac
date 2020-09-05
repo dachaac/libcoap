@@ -2,6 +2,7 @@
 #
 # Copyright (C) 2010-2015 Olaf Bergmann <bergmann@tzi.org>
 #           (C) 2015-2018 Carsten Schoenert <c.schoenert@t-online.de>
+# Copyright (c) 2018 by cisco Systems, Inc.
 #
 # Please run 'autogen.sh' to let autoconf produce a configure script.
 
@@ -525,6 +526,19 @@ if test "x$build_gcov" = "xyes"; then
    fi
 fi
 
+# configure options
+# __cisco__
+AC_ARG_WITH([cisco],
+            [AS_HELP_STRING([--with-cisco],
+                            [Include Cisco specific changes])],
+            [with_cisco="$withval"],
+            [with_cisco="no"])
+
+if test "x$with_cisco" = "xyes"; then
+    AC_DEFINE(HAVE_CISCO, [1], [Define if the system should be built with Cisco changes enabled])
+fi
+
+
 # end configure options
 #######################
 
@@ -729,8 +743,14 @@ if test "x$build_examples" = "xyes"; then
 else
     AC_MSG_RESULT([      build examples          : "no"])
 fi
+if test "x$with_cisco" = "xyes"; then
+    AC_MSG_RESULT([      build cisco             : "yes"])
+else
+    AC_MSG_RESULT([      build cisco             : "no"])
+fi
 if test "x$build_gcov" = "xyes"; then
     AC_MSG_RESULT([      build with gcov support : "yes"])
 else
     AC_MSG_RESULT([      build with gcov support : "no"])
 fi
+

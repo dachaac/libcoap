@@ -68,6 +68,37 @@
 #define TLSEXT_TYPE_server_certificate_type 20
 #endif
 
+#if HAVE_CISCO
+/* Cisco PSV SEC_CRY_PRIM4 Required Ciphers */
+#define SEC_CRY_PRIM_4_CIPHER_LIST "ECDHE-ECDSA-AES128-GCM-SHA256:\
+ECDHE-RSA-AES128-GCM-SHA256:\
+AES128-GCM-SHA256:\
+ECDHE-ECDSA-CHACHA20-POLY1305:\
+ECDHE-RSA-CHACHA20-POLY1305:\
+ECDHE-ECDSA-AES128-SHA256:\
+ECDHE-ECDSA-AES128-SHA:\
+ECDHE-RSA-AES128-SHA:\
+ECDHE-RSA-AES128-SHA256:\
+AES128-SHA256:\
+AES128-SHA:\
+ECDHE-ECDSA-AES256-GCM-SHA384:\
+ECDHE-RSA-AES256-GCM-SHA384:\
+AES256-GCM-SHA384:\
+ECDHE-ECDSA-AES256-SHA384:\
+ECDHE-RSA-AES256-SHA384:\
+AES256-SHA256:\
+DHE-RSA-AES128-GCM-SHA256:\
+DHE-RSA-AES128-SHA:\
+DHE-RSA-AES128-SHA256:\
+DHE-RSA-AES256-GCM-SHA384:\
+DHE-DSS-AES256-GCM-SHA384:\
+DHE-RSA-AES256-SHA256:\
+DHE-DSS-AES128-GCM-SHA256:\
+DHE-DSS-AES128-SHA:\
+DHE-DSS-AES128-SHA256:\
+DHE-DSS-AES256-SHA256:\
+ECDHE-ECDSA-AES128-CCM8" /* This Cipher is required by EST CoAPs */
+#endif /* HAVE_CISCO */
 /* This structure encapsulates the OpenSSL context object. */
 typedef struct coap_dtls_context_t {
   SSL_CTX *ctx;
@@ -102,6 +133,19 @@ typedef struct coap_openssl_context_t {
   size_t sni_count;
   sni_entry *sni_entry_list;
 } coap_openssl_context_t;
+
+#if HAVE_CISCO
+/*
+ * Hold onto the MTU to be used during the DTLS handshake phase of
+ * a connection.  By default, we just let it be the default value that
+ * libcoap wants to use.  But, this can be overridden below when CiscoEST
+ * calls in and has a specific MTU value.  Normally, using a global in this way
+ * is bad due to multithreading issues.  In this case the intention is for
+ * all connections to use this MTU during the DTLS handshake, so there's
+ * no real need to maintain a context specific setting.
+ */
+static int dtls_handshake_mtu = COAP_DEFAULT_MTU;
+#endif
 
 int coap_dtls_is_supported(void) {
   if (SSLeay() < 0x10100000L) {
@@ -504,6 +548,14 @@ void *coap_dtls_new_context(struct coap_context_t *coap_context) {
     SSL_CTX_set_app_data(context->dtls.ctx, &context->dtls);
     SSL_CTX_set_read_ahead(context->dtls.ctx, 1);
     SSL_CTX_set_cipher_list(context->dtls.ctx, "TLSv1.2:TLSv1.0");
+#if HAVE_CISCO
+        /* 
+         * As part of the Cisco PSB we require a stricter set of ciphers to use
+         * during a DTLS connection and thus this call to set ciphers is
+         * required
+         */
+        SSL_CTX_set_cipher_list(context->dtls.ctx, SEC_CRY_PRIM_4_CIPHER_LIST);
+#endif
     if (!RAND_bytes(cookie_secret, (int)sizeof(cookie_secret))) {
       if (dtls_log_level >= LOG_WARNING)
         coap_log(LOG_WARNING,
@@ -537,6 +589,13 @@ void *coap_dtls_new_context(struct coap_context_t *coap_context) {
     SSL_CTX_set_app_data(context->tls.ctx, &context->tls);
     SSL_CTX_set_min_proto_version(context->tls.ctx, TLS1_VERSION);
     SSL_CTX_set_cipher_list(context->tls.ctx, "TLSv1.2:TLSv1.0");
+#if HAVE_CISCO
+        /* 
+         * As part of the Cisco PSB we require a stricter set of ciphers to use
+         * during a TLS connection and thus this call to set ciphers is required
+         */
+        SSL_CTX_set_cipher_list(context->tls.ctx, SEC_CRY_PRIM_4_CIPHER_LIST);
+#endif
     SSL_CTX_set_info_callback(context->tls.ctx, coap_dtls_info_callback);
     context->tls.meth = BIO_meth_new(BIO_TYPE_SOCKET, "coapsock");
     if (!context->tls.meth)
@@ -684,9 +743,12 @@ setup_pki_server(SSL_CTX *ctx,
       }
     }
     else {
+#if !HAVE_CISCO
+/* Cisco specific: prevent error return to allow setup_pki_server to complete */
       coap_log(LOG_ERR,
              "*** setup_pki: (D)TLS: No Server Certificate defined\n");
       return 0;
+#endif
     }
 
     if (setup_data->pki_key.key.pem.private_key &&
@@ -702,9 +764,12 @@ setup_pki_server(SSL_CTX *ctx,
       }
     }
     else {
+#if !HAVE_CISCO
+/* Cisco specific: prevent error return to allow setup_pki_server to complete */        
       coap_log(LOG_ERR,
            "*** setup_pki: (D)TLS: No Server Private Key defined\n");
       return 0;
+#endif
     }
 
     if (setup_data->pki_key.key.pem.ca_file &&
@@ -718,11 +783,13 @@ setup_pki_server(SSL_CTX *ctx,
       if (cert_names != NULL)
         SSL_CTX_set_client_CA_list(ctx, cert_names);
       else {
+#if !HAVE_CISCO
+/* Cisco specific: prevent error return to allow setup_pki_server to complete */
         coap_log(LOG_WARNING,
-                 "*** setup_pki: (D)TLS: %s: Unable to configure "
-                 "client CA File\n",
+                 "*** setup_pki: (D)TLS: %s: Unable to configure client CA File\n",
                   setup_data->pki_key.key.pem.ca_file);
         return 0;
+#endif        
       }
       st = SSL_CTX_get_cert_store(ctx);
       in = BIO_new(BIO_s_file());
@@ -758,9 +825,12 @@ setup_pki_server(SSL_CTX *ctx,
       }
     }
     else {
+#if !HAVE_CISCO
+/* Cisco specific: prevent error return to allow setup_pki_server to complete */
       coap_log(LOG_ERR,
              "*** setup_pki: (D)TLS: No Server Certificate defined\n");
       return 0;
+#endif
     }
 
     if (setup_data->pki_key.key.asn1.private_key &&
@@ -801,6 +871,59 @@ setup_pki_server(SSL_CTX *ctx,
       X509_free(x509);
     }
     break;
+#if HAVE_CISCO    
+  case COAP_PKI_KEY_OSSL:
+    /*
+     * First load the ID cert for the server
+     */
+    if (setup_data->pki_key.key.ossl.public_cert) {
+      if (!(SSL_CTX_use_certificate(ctx, setup_data->pki_key.key.ossl.public_cert))) {
+        coap_log(LOG_WARNING,
+                 "*** setup_pki: (D)TLS: %s: Unable to configure "
+                 "Server Certificate\n",
+                 "OpenSSL defined structures");
+        return 0;
+      }
+    }
+    else {
+      coap_log(LOG_ERR,
+             "*** setup_pki: (D)TLS: No Server Certificate defined\n");
+      return 0;
+    }
+
+    /*
+     * Then load the private key
+     */
+    if (setup_data->pki_key.key.ossl.private_key) {
+      if (!(SSL_CTX_use_PrivateKey(ctx, setup_data->pki_key.key.ossl.private_key))) {
+        coap_log(LOG_WARNING,
+                 "*** setup_pki: (D)TLS: %s: Unable to configure "
+                 "Server Private Key\n",
+                 "OpenSSL defined structures");
+        return 0;
+      }
+    }
+    else {
+      coap_log(LOG_ERR,
+             "*** setup_pki: (D)TLS: No Server Private Key defined\n");
+      return 0;
+    }
+
+    /*
+     * And finally, the CA certs used when building the cert chain during handshaking
+     */
+    if (setup_data->pki_key.key.ossl.ca_certs) {
+      SSL_CTX_set_cert_store(ctx, setup_data->pki_key.key.ossl.ca_certs);
+    }
+    else {
+        coap_log(LOG_WARNING,
+                 "*** setup_pki: (D)TLS: %s: %s: Unable to configure "
+                 "client CA File\n",
+                 "OpenSSL defined structures", setup_data->pki_key.key.pem.ca_file);
+        return 0;
+      }    
+    break;
+#endif      
   default:
     coap_log(LOG_ERR,
              "*** setup_pki: (D)TLS: Unknown key type %d\n",
@@ -955,6 +1078,73 @@ setup_pki_ssl(SSL *ssl,
       X509_free(x509);
     }
     break;
+#if HAVE_CISCO    
+  case COAP_PKI_KEY_OSSL:
+    /*
+     * First load the ID cert for the server
+     */
+    if (setup_data->pki_key.key.ossl.public_cert) {
+      if (!(SSL_use_certificate(ssl, setup_data->pki_key.key.ossl.public_cert))) {
+        coap_log(LOG_WARNING,
+                 "*** setup_pki: (D)TLS: %s: Unable to configure "
+                 "Client Certificate\n",
+                 "OpenSSL defined structures");
+        return 0;
+      }
+    }
+    else {
+      coap_log(LOG_ERR,
+             "*** setup_pki: (D)TLS: No Client Certificate defined\n");
+      return 0;
+    }
+
+    /*
+     * Then load the private key
+     */
+    if (setup_data->pki_key.key.ossl.private_key) {
+      if (!(SSL_use_PrivateKey(ssl, setup_data->pki_key.key.ossl.private_key))) {
+        coap_log(LOG_WARNING,
+                 "*** setup_pki: (D)TLS: %s: Unable to configure "
+                 "Client Private Key\n",
+                 "OpenSSL defined structures");
+        return 0;
+      }
+    }
+    else {
+      coap_log(LOG_ERR,
+             "*** setup_pki: (D)TLS: No Client Private Key defined\n");
+      return 0;
+    }
+
+    /*
+     * And finally, the CA certs used when building the cert chain during handshaking
+     */
+    if (setup_data->pki_key.key.ossl.ca_certs) {
+
+        if (!SSL_set1_verify_cert_store(ssl, setup_data->pki_key.key.ossl.ca_certs)) {
+            /*
+             * something went wrong
+             */
+            coap_log(LOG_ERR, "*** setup_pki: (D)TLS: Failed to set the X509 store"
+                     " for verification.\n");
+            return 0;
+        }
+        if (!SSL_set1_chain_cert_store(ssl, setup_data->pki_key.key.ossl.ca_certs)) {
+            /*
+             * something went wrong
+             */
+            coap_log(LOG_ERR, "*** setup_pki: (D)TLS: Failed to set the X509 store"
+                     " for chain building when handshaking.\n");
+            return 0;
+        }
+    } else {
+        coap_log(LOG_ERR,
+                 "*** setup_pki: (D)TLS: No CA certs defined\n");
+        return 0;
+    }
+    
+    break;
+#endif    
   default:
     coap_log(LOG_ERR,
              "*** setup_pki: (D)TLS: Unknown key type %d\n",
@@ -1186,7 +1376,13 @@ tls_secret_call_back(SSL *ssl,
     /*
      * Force a PSK algorithm to be used, so we do PSK
      */
+#if !HAVE_CISCO
+    /* 
+     * As part of the Cisco PSB we require a stricter set of ciphers which does
+     * not include any PSK ciphers and thus this call must be removed
+     */
     SSL_set_cipher_list (ssl, "PSK:!NULL");
+#endif
     SSL_set_psk_server_callback(ssl, coap_dtls_psk_server_callback);
   }
   if (setup_data->additional_tls_setup_call_back) {
@@ -1249,6 +1445,14 @@ tls_server_name_call_back(SSL *ssl,
         SSL_CTX_set_app_data(ctx, &context->dtls);
         SSL_CTX_set_read_ahead(ctx, 1);
         SSL_CTX_set_cipher_list(ctx, "TLSv1.2:TLSv1.0");
+#if HAVE_CISCO
+        /*
+         * As part of the Cisco PSB we require a stricter set of ciphers to use
+         * during a DTLS connection and thus this call to set ciphers is
+         * required
+         */
+        SSL_CTX_set_cipher_list(ctx, SEC_CRY_PRIM_4_CIPHER_LIST);
+#endif
         SSL_CTX_set_cookie_generate_cb(ctx, coap_dtls_generate_cookie);
         SSL_CTX_set_cookie_verify_cb(ctx, coap_dtls_verify_cookie);
         SSL_CTX_set_info_callback(ctx, coap_dtls_info_callback);
@@ -1262,6 +1466,13 @@ tls_server_name_call_back(SSL *ssl,
         SSL_CTX_set_app_data(ctx, &context->tls);
         SSL_CTX_set_min_proto_version(ctx, TLS1_VERSION);
         SSL_CTX_set_cipher_list(ctx, "TLSv1.2:TLSv1.0");
+#if HAVE_CISCO
+        /* 
+         * As part of the Cisco PSB we require a stricter set of ciphers to use
+         * during a TLS connection and thus this call to set ciphers is required
+         */
+        SSL_CTX_set_cipher_list(ctx, SEC_CRY_PRIM_4_CIPHER_LIST);
+#endif
         SSL_CTX_set_info_callback(ctx, coap_dtls_info_callback);
         SSL_CTX_set_alpn_select_cb(ctx, server_alpn_callback, NULL);
       }
@@ -1269,6 +1480,9 @@ tls_server_name_call_back(SSL *ssl,
       sni_setup_data.pki_key.key_type = new_entry->key_type;
       sni_setup_data.pki_key.key.pem = new_entry->key.pem;
       sni_setup_data.pki_key.key.asn1 = new_entry->key.asn1;
+#if HAVE_CISCO      
+      sni_setup_data.pki_key.key.ossl = new_entry->key.ossl;
+#endif      
       setup_pki_server(ctx, &sni_setup_data);
 
       context->sni_entry_list = OPENSSL_realloc(context->sni_entry_list,
@@ -1496,6 +1710,21 @@ is_x509:
     if (!setup_data->additional_tls_setup_call_back(ssl, setup_data))
      return 0;
   }
+  
+#if HAVE_CISCO
+  /*
+   * If the application layer has registered a dtls timer callback function,
+   * and in the case of EST it will have, then register it now with OpenSSL.
+   * For CiscoEST, we also know that the arg value is the EST ctx.  Set this
+   * into the CoAP session structure so that we can walk our way back to it from
+   * the SSL structure.
+   */
+  if (setup_data->dtls_timer_call_back) {
+      DTLS_set_timer_cb(ssl, setup_data->dtls_timer_call_back);
+      coap_session_set_app_data(session, setup_data->dtls_timer_call_back_arg);
+  }
+#endif
+  
   return SSL_CLIENT_HELLO_SUCCESS;
 }
 #endif /* OPENSSL_VERSION_NUMBER >= 0x10101000L */
@@ -1525,16 +1754,47 @@ coap_dtls_context_set_pki(coap_context_t *ctx,
        * which is not in 1.1.0
        */
 #if OPENSSL_VERSION_NUMBER < 0x10101000L
-      if (SSLeay() >= 0x10101000L) {
-        coap_log(LOG_WARNING,
-                 "OpenSSL compiled with %lux, linked with %lux, so "
-                 "no certificate checking\n",
-                 OPENSSL_VERSION_NUMBER, SSLeay());
+#if HAVE_CISCO      
+      /*
+       * Cisco:  Go back to the implementation where the application gets a chance to set
+       * up the PKI mode at init time by being invoked with the context structure.  We will
+       * load the private key, certificate, and trust store from the OpenSSL structures we have
+       * since we don't have files to
+       */
+      if (setup_data->app_override_tls_setup_call_back) {
+        /* Application wants to be in total control */
+        if (!setup_data->app_override_tls_setup_call_back(context->dtls.ctx,
+                                                          NULL, setup_data))
+          return 0;
+      } else
+#endif /* CISCO */          
+      {
+        if (SSLeay() >= 0x10101000L) {
+            coap_log(LOG_WARNING,
+                     "OpenSSL compiled with %lux, linked with %lux, so "
+                     "no certificate checking\n",
+                     OPENSSL_VERSION_NUMBER, SSLeay());
+        }
+        SSL_CTX_set_tlsext_servername_arg(context->dtls.ctx, &context->setup_data);
+        SSL_CTX_set_tlsext_servername_callback(context->dtls.ctx,
+                                               tls_server_name_call_back);
       }
-      SSL_CTX_set_tlsext_servername_arg(context->dtls.ctx, &context->setup_data);
-      SSL_CTX_set_tlsext_servername_callback(context->dtls.ctx,
-                                             tls_server_name_call_back);
 #else /* OPENSSL_VERSION_NUMBER >= 0x10101000L */
+#if HAVE_CISCO
+      /*
+       * Cisco:  Go back to the implementation where the application gets a chance to set
+       * up the PKI mode at init time by being invoked with the context structure.  We will
+       * load the private key, certificate, and trust store from the OpenSSL structures we have
+       * since we don't have files to
+       */
+      if (setup_data->app_override_tls_setup_call_back) {
+        /* Application wants to be in total control */
+        if (!setup_data->app_override_tls_setup_call_back(context->dtls.ctx,
+                                                          NULL, setup_data))
+          return 0;
+      }
+#endif /* CISCO */
+      
       SSL_CTX_set_client_hello_cb(context->dtls.ctx,
                                     tls_client_hello_call_back,
                                     NULL);
@@ -1586,7 +1846,25 @@ coap_dtls_context_set_pki(coap_context_t *ctx,
     SSL_set_bio(context->dtls.ssl, bio, bio);
     SSL_set_app_data(context->dtls.ssl, NULL);
     SSL_set_options(context->dtls.ssl, SSL_OP_COOKIE_EXCHANGE);
+#if HAVE_CISCO
+    /*
+     * If we're in Cisco EST mode we need to provide a way to limit the MTU
+     * during DTLS handshake phase.  This value is being passed in from
+     * CiscoEST.  I suspect the actual setting of the MTU in OpenSSL here is
+     * not really achieving anything but is being done because the existing
+     * code is doing it.  What seemed to really work was to set this global
+     * static here and then make the call when the client hello is processed
+     * in coap_dtls_hello().
+     */
+    if (setup_data->dtls_handshake_mtu) {
+        dtls_handshake_mtu = setup_data->dtls_handshake_mtu;
+        SSL_set_mtu(context->dtls.ssl, setup_data->dtls_handshake_mtu);
+    } else {
+        SSL_set_mtu(context->dtls.ssl, COAP_DEFAULT_MTU);
+    }
+#else
     SSL_set_mtu(context->dtls.ssl, COAP_DEFAULT_MTU);
+#endif
   }
   context->psk_pki_enabled |= IS_PKI;
   return 1;
@@ -1716,7 +1994,13 @@ setup_client_ssl_session(coap_session_t *session, SSL *ssl
   if (context->psk_pki_enabled & IS_PSK) {
     SSL_set_psk_client_callback(ssl, coap_dtls_psk_client_callback);
     SSL_set_psk_server_callback(ssl, coap_dtls_psk_server_callback);
+#if !HAVE_CISCO
+    /* 
+     * As part of the Cisco PSB we require a stricter set of ciphers which does
+     * not include any PSK ciphers and thus this call must be removed
+     */
     SSL_set_cipher_list(ssl, "PSK:!NULL");
+#endif
   }
   if (context->psk_pki_enabled & IS_PKI) {
     coap_dtls_pki_t *setup_data = &context->setup_data;
@@ -1815,6 +2099,8 @@ void coap_dtls_free_session(coap_session_t *session) {
     }
     SSL_free(ssl);
     session->tls = NULL;
+    if (session->context)
+      coap_handle_event(session->context, COAP_EVENT_DTLS_CLOSED, session);
   }
 }
 
@@ -1843,7 +2129,9 @@ int coap_dtls_send(coap_session_t *session,
   }
 
   if (session->dtls_event >= 0) {
-    coap_handle_event(session->context, session->dtls_event, session);
+    /* COAP_EVENT_DTLS_CLOSED event reported in coap_session_disconnected() */
+    if (session->dtls_event != COAP_EVENT_DTLS_CLOSED)
+      coap_handle_event(session->context, session->dtls_event, session);
     if (session->dtls_event == COAP_EVENT_DTLS_ERROR ||
         session->dtls_event == COAP_EVENT_DTLS_CLOSED) {
       coap_session_disconnected(session, COAP_NACK_TLS_FAILED);
@@ -1890,7 +2178,11 @@ int coap_dtls_hello(coap_session_t *session,
   coap_ssl_data *ssl_data;
   int r;
 
+#if HAVE_CISCO
+  SSL_set_mtu(dtls->ssl, dtls_handshake_mtu);
+#else
   SSL_set_mtu(dtls->ssl, session->mtu);
+#endif
   ssl_data = (coap_ssl_data*)BIO_get_data(SSL_get_rbio(dtls->ssl));
   ssl_data->session = session;
   ssl_data->pdu = data;
@@ -1944,7 +2236,9 @@ int coap_dtls_receive(coap_session_t *session,
       r = -1;
     }
     if (session->dtls_event >= 0) {
-      coap_handle_event(session->context, session->dtls_event, session);
+      /* COAP_EVENT_DTLS_CLOSED event reported in coap_session_disconnected() */
+      if (session->dtls_event != COAP_EVENT_DTLS_CLOSED)
+        coap_handle_event(session->context, session->dtls_event, session);
       if (session->dtls_event == COAP_EVENT_DTLS_ERROR ||
           session->dtls_event == COAP_EVENT_DTLS_CLOSED) {
         coap_session_disconnected(session, COAP_NACK_TLS_FAILED);
@@ -2116,6 +2410,8 @@ void coap_tls_free_session(coap_session_t *session) {
     }
     SSL_free(ssl);
     session->tls = NULL;
+    if (session->context)
+      coap_handle_event(session->context, COAP_EVENT_DTLS_CLOSED, session);
   }
 }
 
@@ -2160,7 +2456,9 @@ ssize_t coap_tls_write(coap_session_t *session,
   }
 
   if (session->dtls_event >= 0) {
-    coap_handle_event(session->context, session->dtls_event, session);
+    /* COAP_EVENT_DTLS_CLOSED event reported in coap_session_disconnected() */
+    if (session->dtls_event != COAP_EVENT_DTLS_CLOSED)
+      coap_handle_event(session->context, session->dtls_event, session);
     if (session->dtls_event == COAP_EVENT_DTLS_ERROR ||
         session->dtls_event == COAP_EVENT_DTLS_CLOSED) {
       coap_session_disconnected(session, COAP_NACK_TLS_FAILED);
@@ -2209,7 +2507,9 @@ ssize_t coap_tls_read(coap_session_t *session,
   }
 
   if (session->dtls_event >= 0) {
-    coap_handle_event(session->context, session->dtls_event, session);
+    /* COAP_EVENT_DTLS_CLOSED event reported in coap_session_disconnected() */
+    if (session->dtls_event != COAP_EVENT_DTLS_CLOSED)
+      coap_handle_event(session->context, session->dtls_event, session);
     if (session->dtls_event == COAP_EVENT_DTLS_ERROR ||
         session->dtls_event == COAP_EVENT_DTLS_CLOSED) {
       coap_session_disconnected(session, COAP_NACK_TLS_FAILED);

@@ -306,7 +306,10 @@ typedef struct coap_endpoint_t {
   coap_socket_t sock;             /**< socket object for the interface, if any */
   coap_address_t bind_addr;       /**< local interface address */
   coap_session_t *sessions;       /**< list of active sessions */
-  coap_session_t hello;           /**< special session of DTLS hello messages */
+#if HAVE_CISCO
+  uint16_t session_max;           /**< maximum number of active DTLS sessions */
+  uint16_t session_cnt;           /**< current number of active DTLS sessions */
+#endif
 } coap_endpoint_t;
 
 /**
@@ -328,6 +331,15 @@ coap_endpoint_t *coap_new_endpoint(struct coap_context_t *context, const coap_ad
 */
 void coap_endpoint_set_default_mtu(coap_endpoint_t *endpoint, unsigned mtu);
 
+/**
+* Set the endpoint's maximum session count. This is the maximum number of sessions at any moment
+* on this endpoint.
+*
+* @param endpoint The CoAP endpoint.
+* @param session_max maximum number of active DTLS sessions
+*/
+void coap_endpoint_set_session_max(coap_endpoint_t *ep, unsigned session_max);
+
 void coap_free_endpoint(coap_endpoint_t *ep);
 
 
@@ -347,24 +359,24 @@ const char *coap_endpoint_str(const coap_endpoint_t *endpoint);
 * @param endpoint Active endpoint the packet was received on.
 * @param packet Received packet.
 * @param now The current time in ticks.
-* @return The CoAP session.
+* @return The CoAP session or @c NULL if error.
 */
 coap_session_t *coap_endpoint_get_session(coap_endpoint_t *endpoint,
   const struct coap_packet_t *packet, coap_tick_t now);
 
 /**
- * Create a new DTLS session for the @p endpoint.
+ * Create a new DTLS session for the @p session.
+ * Note: the @p session is released if no DTLS server session can be created.
  *
  * @ingroup dtls_internal
  *
- * @param endpoint  Endpoint to add DTLS session to
- * @param packet    Received packet information to base session on.
+ * @param session   Session to add DTLS session to
  * @param now       The current time in ticks.
  *
- * @return Created CoAP session or @c NULL if error.
+ * @return CoAP session or @c NULL if error.
  */
-coap_session_t *coap_endpoint_new_dtls_session(coap_endpoint_t *endpoint,
-  const struct coap_packet_t *packet, coap_tick_t now);
+coap_session_t *coap_session_new_dtls_session(coap_session_t *session,
+  coap_tick_t now);
 
 coap_session_t *coap_session_get_by_peer(struct coap_context_t *ctx,
   const struct coap_address_t *remote_addr, int ifindex);
@@ -384,8 +396,11 @@ void coap_session_mfree(coap_session_t *session);
    * Number of seconds when to expect an ACK or a response to an
    * outstanding CON message.
    * RFC 7252, Section 4.8 Default value of ACK_TIMEOUT is 2
+   * In the RA FND style performance testing, it was found that
+   * an ACK_TIMEOUT of 5 is actually the optimal value and will
+   * be a baseline recommendation to start with.
    */
-#define COAP_DEFAULT_ACK_TIMEOUT ((coap_fixed_point_t){2,0})
+#define COAP_DEFAULT_ACK_TIMEOUT ((coap_fixed_point_t){5,0})
 
    /**
     * A factor that is used to randomize the wait time before a message

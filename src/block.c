@@ -186,8 +186,19 @@ coap_add_data_blocked_response(coap_resource_t *resource,
     block2.num = 0;
     block2_requested = 1;
   }
+  /*
+   * PDB:  In successful case, ESToCoAP states different codes
+   *       for GET versus POST.  CoAP was hard coding 2.05 here
+   *       with no way to give 2.04, so we load the response code
+   *       in the response PDU structure before calling and prevent
+   *       it from being overwritten here.
+   */
+#if !HAVE_CISCO   
   response->code = COAP_RESPONSE_CODE(205);
-
+#else
+  coap_log(LOG_DEBUG, "coap response code = %d\n", response->code);  
+#endif
+  
   /* add etag for the resource */
   memset(etag, 0, sizeof(etag));
   coap_hash(data, length, etag);

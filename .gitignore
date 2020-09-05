@@ -65,6 +65,7 @@ man/*.7
 examples/.deps/
 examples/*.o
 examples/coap-client
+examples/perf-client
 examples/coap-etsi_iot_01
 examples/coap-rd
 examples/coap-server

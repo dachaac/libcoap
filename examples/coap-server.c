@@ -36,6 +36,7 @@
 /* Need to refresh time once per sec */
 #define COAP_RESOURCE_CHECK_TIME 1
 
+#define HAVE_CISCO 1
 #include <coap2/coap.h>
 
 #ifndef min

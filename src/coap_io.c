@@ -94,7 +94,6 @@ struct coap_endpoint_t *
 void
 coap_mfree_endpoint(struct coap_endpoint_t *ep) {
   ep_initialized = 0;
-  coap_session_mfree(&ep->hello);
 }
 
 int
@@ -184,7 +183,6 @@ struct coap_endpoint_t *
 
 void
 coap_mfree_endpoint(struct coap_endpoint_t *ep) {
-  coap_session_mfree(&ep->hello);
   coap_free_type(COAP_ENDPOINT, ep);
 }
 
@@ -243,12 +241,28 @@ coap_socket_bind_udp(coap_socket_t *sock,
     break;
   }
 
-  if (bind(sock->fd, &listen_addr->addr.sa, listen_addr->size) == COAP_SOCKET_ERROR) {
-    coap_log(LOG_WARNING, "coap_socket_bind_udp: bind: %s\n",
-             coap_socket_strerror());
-    goto error;
+#if HAVE_CISCO
+  /*
+   * In EST/RA we pass in a port number to allow the init processing to
+   * continue as normal but what will actually happen is the RA/EST code will
+   * swap in the actual file descriptor/port from which to read, causing this
+   * port here to never be processed and effectively dead.  CiscoRA was
+   * setting this port here to the default for CoAP, 5683, and this is causing
+   * conflicts for FND, so now RA will pass in 0.  This logic is still needed when
+   * built with estserver/estproxy, so now only bind the port if the port num is
+   * something other than 0.
+   */
+  if (listen_addr->addr.sin.sin_port != 0x0) {
+#endif
+      if (bind(sock->fd, &listen_addr->addr.sa, listen_addr->size) == COAP_SOCKET_ERROR) {
+          coap_log(LOG_WARNING, "coap_socket_bind_udp: bind: %s\n",
+                   coap_socket_strerror());
+          goto error;
+      }
+#if HAVE_CISCO
   }
-
+#endif
+  
   bound_addr->size = (socklen_t)sizeof(*bound_addr);
   if (getsockname(sock->fd, &bound_addr->addr.sa, &bound_addr->size) < 0) {
     coap_log(LOG_WARNING,
@@ -1057,6 +1071,13 @@ coap_network_read(coap_socket_t *sock, coap_packet_t *packet) {
         }
 #endif /* IP_PKTINFO */
       }
+#if HAVE_CISCO
+      /* Cisco specific change. If the stack is dirty, ifindex will not be 0
+       * initially.  Insure that it is */
+      if (!CMSG_FIRSTHDR(&mhdr)) {
+        packet->ifindex = 0;
+      }
+#endif      
     }
 #endif /* !defined(WITH_CONTIKI) */
 #ifdef WITH_CONTIKI

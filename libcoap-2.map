@@ -48,6 +48,7 @@ global:
   coap_encode_var_safe;
   coap_endpoint_get_session;
   coap_endpoint_set_default_mtu;
+  coap_endpoint_set_session_max;
   coap_endpoint_str;
   coap_find_async;
   coap_find_attr;

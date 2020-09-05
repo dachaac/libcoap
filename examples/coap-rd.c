@@ -38,6 +38,7 @@
 #include <dirent.h>
 #endif
 
+#define HAVE_CISCO 1
 #include <coap2/coap.h>
 
 #define COAP_RESOURCE_CHECK_TIME 2

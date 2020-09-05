@@ -16,7 +16,15 @@
 #include "address.h"
 
 #ifndef COAP_RXBUFFER_SIZE
+
+#if HAVE_OPENSSL && HAVE_CISCO
+/* Set buffer size to a size capable of capturing the largest DTLS packet */
+#include <openssl/ssl3.h>
+#define COAP_RXBUFFER_SIZE (SSL3_RT_MAX_PACKET_SIZE + 1)
+#else
 #define COAP_RXBUFFER_SIZE 1472
+#endif /* HAVE_OPENSSL */
+
 #endif /* COAP_RXBUFFER_SIZE */
 
 #ifdef _WIN32

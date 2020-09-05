@@ -1,6 +1,7 @@
 # examples/Makefile.am
 #
 # Copyright (C)      2015 Carsten Schoenert <c.schoenert@t-online.de>
+# Copyright (c) 2018 by cisco Systems, Inc.
 #
 # This file is part of the CoAP C library libcoap. Please see README and
 # COPYING for terms of use.
@@ -13,12 +14,14 @@ AM_CFLAGS = -I$(top_builddir)/include -I$(top_srcdir)/include \
             -I$(top_srcdir)/include/coap$(LIBCOAP_API_VERSION) \
             $(WARNING_CFLAGS) $(DTLS_CFLAGS) -std=c99
 
-#
-bin_PROGRAMS = coap-client coap-server coap-rd
+bin_PROGRAMS = coap-client perf-client coap-server coap-rd
 check_PROGRAMS = coap-etsi_iot_01 coap-tiny
 
 coap_client_SOURCES = client.c
 coap_client_LDADD =  $(DTLS_LIBS) $(top_builddir)/.libs/libcoap-$(LIBCOAP_NAME_SUFFIX).la
+
+perf_client_SOURCES = perf-client.c
+perf_client_LDADD = $(DTLS_LIBS) $(top_builddir)/.libs/libcoap-$(LIBCOAP_NAME_SUFFIX).la -lm
 
 coap_server_SOURCES = coap-server.c
 coap_server_LDADD = $(DTLS_LIBS) $(top_builddir)/.libs/libcoap-$(LIBCOAP_NAME_SUFFIX).la
